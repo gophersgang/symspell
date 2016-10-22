@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"container/heap"
 	"flag"
 	"fmt"
 	"hash"
@@ -16,7 +17,8 @@ func main() {
 	flag.Parse()
 	eachLine(config.corpus, func(line string) {
 		word := readWord(line)
-		config.dict[word.spell] = append(config.dict[word.spell], word)
+		//config.dict[word.spell] = append(config.dict[word.spell], word)
+
 		for _, spell := range edits([]rune(word.spell), 0) {
 			config.dict[spell] = append(config.dict[spell], word)
 		}
@@ -46,8 +48,12 @@ func eachLine(fp string, proc func(string)) {
 		}
 	}
 }
+
+// only delete one, no transposes, replaces and inserts
 func edits(q []rune, ed int) (v []string) {
+	v = append(v, string(q))
 	ed++
+
 	for i := 0; i < len(q); i++ {
 		x := remove(q, i)
 		v = append(v, string(x))
@@ -62,12 +68,20 @@ func remove(runes []rune, i int) []rune {
 	return append(v, runes[i+1:]...)
 }
 func search(q string) (v []*word) {
-	if candis, ok := config.dict[q]; ok {
-		return candis
-	}
+	var bs byspell
 	for _, spell := range edits([]rune(q), 0) {
 		if candis, ok := config.dict[spell]; ok {
-			v = append(v, candis...)
+			bs = append(bs, candis...)
+		}
+	}
+
+	heap.Init(&bs)
+	var prev *word
+	for len(v) < config.n && bs.Len() > 0 {
+		last := heap.Pop(&bs).(*word)
+		if prev == nil || prev.spell != last.spell {
+			v = append(v, last)
+			prev = last
 		}
 	}
 	return
@@ -77,12 +91,14 @@ func init() {
 	flag.StringVar(&config.corpus, "corpus", "media-resites-v3.tsv", "")
 	flag.StringVar(&config.q, "q", "xiaoaobang", "")
 	flag.IntVar(&config.editdistance, "ed", 1, "")
+	flag.IntVar(&config.n, "n", 3, "")
 	config.dict = make(map[string][]*word)
 	config.hash = xh.NewS64(uint64(time.Now().UnixNano()))
 }
 
 var config struct {
 	editdistance int
+	n            int
 	corpus       string
 	q            string
 	hash         hash.Hash64
@@ -92,4 +108,25 @@ var config struct {
 type word struct {
 	spell   string
 	snippet interface{}
+}
+
+type byspell []*word
+
+func (bs byspell) Less(i, j int) bool {
+	return bs[i].spell < bs[j].spell
+}
+func (bs byspell) Swap(i, j int) {
+	bs[i], bs[j] = bs[j], bs[i]
+}
+func (bs byspell) Len() int {
+	return len(bs)
+}
+func (bs *byspell) Push(x interface{}) {
+	*bs = append(*bs, x.(*word))
+}
+func (bs *byspell) Pop() interface{} {
+	old, n := *bs, len(*bs)
+	x := old[n-1]
+	*bs = old[0 : n-1]
+	return x
 }
